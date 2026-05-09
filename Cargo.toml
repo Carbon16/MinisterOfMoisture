@@ -11,7 +11,7 @@ esp-idf-sys = "0.34"
 embedded-hal = "0.2"
 
 [package.metadata.esp-idf-sys]
-esp_idf_version = "v4.4.1"
+esp_idf_version = "v5.1"
 esp_idf_tools_install_dir = "global"
 
 [build-dependencies]
