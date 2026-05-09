@@ -1,0 +1,11 @@
+[package]
+name = "MinisterOfMoisture"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lcd-lcm1602-i2c = "0.3.0"
+mfrc522 = "0.8.0"
+esp-idf-hal = "0.43"
+esp-idf-sys = "0.34"
+embedded-hal = "0.2"

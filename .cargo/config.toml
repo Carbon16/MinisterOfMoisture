@@ -1,0 +1,11 @@
+[build]
+target-dir = "/tmp/m"
+target = "xtensa-esp32-espidf"
+
+[target.xtensa-esp32-espidf]
+linker = "ldproxy"
+rustflags = ["--cfg", "espidf_time64"]
+runner = "espflash flash --monitor"
+
+[unstable]
+build-std = ["std", "panic_abort"]

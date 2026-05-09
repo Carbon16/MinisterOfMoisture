@@ -1,0 +1,172 @@
+use esp_idf_hal::prelude::*;
+use esp_idf_hal::spi;
+use esp_idf_sys as sys;
+use mfrc522::Mfrc522;
+use std::ffi::CString;
+use std::thread;
+use std::time::Duration;
+
+fn main() {
+    sys::link_patches();
+
+    // Initialize NVS before accessing counters.
+    init_nvs().expect("Failed to initialize NVS");
+
+    // Create peripherals
+    let peripherals = Peripherals::take().unwrap();
+    let pins = peripherals.pins;
+
+    // Configure SPI
+    let spi = peripherals.spi2;
+    let sclk = pins.gpio18;
+    let serial_in = pins.gpio23;
+    let serial_out = pins.gpio19;
+    let cs = pins.gpio5;
+
+    let spi_config = spi::SpiConfig::new()
+        .baudrate(1.MHz().into())
+        .data_mode(embedded_hal::spi::MODE_0);
+
+    let spi_device = spi::SpiDeviceDriver::new(
+        spi,
+        Some(cs),
+        Some(sclk),
+        Some(serial_in),
+        Some(serial_out),
+        &spi_config,
+    )
+    .expect("Failed to create SPI device");
+
+    // Initialize RC522
+    let mut mfrc522 = Mfrc522::new(spi_device).expect("Failed to initialize MFRC522");
+
+    println!("RFID Reader initialized. Waiting for cards...\n");
+
+    loop {
+        // Check if a card is present
+        if let Ok(atqa) = mfrc522.reqa() {
+            println!("Card detected!");
+
+            // Select the card
+            if let Ok(uid) = mfrc522.select(&atqa) {
+                println!("UID: {:02X?}", uid.bytes);
+                println!("UID String: {}", format_uid(&uid.bytes));
+                // Increment and store count for this UID
+                let uid_key = format_uid_nodash(&uid.bytes);
+                match increment_uid_count(&uid_key) {
+                    Ok(new_count) => println!("UID {} count now {}", uid_key, new_count),
+                    Err(e) => println!("Failed to update NVS for {}: {:?}", uid_key, e),
+                }
+            }
+        }
+
+        // Anti-collision detection and read UID
+        match mfrc522.anticollision() {
+            Ok(uid) => {
+                println!("Card UID: {}", format_uid(&uid));
+            }
+            Err(_) => {
+                // No card or reading error, continue
+            }
+        }
+
+        // Delay to avoid overwhelming the reader
+        thread::sleep(Duration::from_millis(500));
+    }
+}
+
+/// Format UID bytes as a readable string
+fn format_uid(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|b| format!("{:02X}", b))
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+fn format_uid_nodash(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join("")
+}
+
+fn init_nvs() -> Result<(), sys::esp_err_t> {
+    let err = unsafe { sys::nvs_flash_init() };
+    if err == sys::ESP_OK {
+        return Ok(());
+    }
+
+    if err == sys::ESP_ERR_NVS_NO_FREE_PAGES || err == sys::ESP_ERR_NVS_NEW_VERSION_FOUND {
+        unsafe {
+            let erase_err = sys::nvs_flash_erase();
+            if erase_err != sys::ESP_OK {
+                return Err(erase_err);
+            }
+        }
+
+        let retry_err = unsafe { sys::nvs_flash_init() };
+        if retry_err == sys::ESP_OK {
+            Ok(())
+        } else {
+            Err(retry_err)
+        }
+    } else {
+        Err(err)
+    }
+}
+
+/// Increment stored counter for `uid_key` and return new count.
+fn increment_uid_count(uid_key: &str) -> Result<u32, sys::esp_err_t> {
+    let namespace = CString::new("storage").expect("valid NVS namespace");
+    let key = CString::new(uid_key).expect("valid NVS key");
+
+    let mut handle: sys::nvs_handle_t = 0;
+    let open_err = unsafe {
+        sys::nvs_open(
+            namespace.as_ptr(),
+            2 as sys::nvs_open_mode_t,
+            &mut handle,
+        )
+    };
+    if open_err != sys::ESP_OK {
+        return Err(open_err);
+    }
+
+    let result = (|| {
+        let mut current: u32 = 0;
+        let get_err = unsafe { sys::nvs_get_u32(handle, key.as_ptr(), &mut current) };
+        if get_err != sys::ESP_OK && get_err != sys::ESP_ERR_NVS_NOT_FOUND {
+            return Err(get_err);
+        }
+
+        let new = current.wrapping_add(1);
+        let set_err = unsafe { sys::nvs_set_u32(handle, key.as_ptr(), new) };
+        if set_err != sys::ESP_OK {
+            return Err(set_err);
+        }
+
+        let commit_err = unsafe { sys::nvs_commit(handle) };
+        if commit_err != sys::ESP_OK {
+            return Err(commit_err);
+        }
+
+        Ok(new)
+    })();
+
+    unsafe {
+        sys::nvs_close(handle);
+    }
+
+    result
+}
+
+struct User {
+    name: String,
+    uid: Vec<u8>,
+    count: u8,
+}
+
+const MOTDS: &[&str] = &[
+    "Waltuh, put ur cup away waltuh",
+    "I am the one who pours",
+    "Say my name",
+    "I am the moisture"
+];
