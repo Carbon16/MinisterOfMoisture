@@ -7,6 +7,7 @@ name = "MinisterOfMoisture"
 version = "0.1.0"
 dependencies = [
  "embedded-hal 0.2.7",
+ "embuild 0.33.1",
  "esp-idf-hal",
  "esp-idf-sys",
  "lcd-lcm1602-i2c",
@@ -434,6 +435,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "embuild"
+version = "0.33.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e188ad2bbe82afa841ea4a29880651e53ab86815db036b2cb9f8de3ac32dad75"
+dependencies = [
+ "anyhow",
+ "bitflags 1.3.2",
+ "filetime",
+ "home",
+ "log",
+ "regex",
+ "remove_dir_all",
+ "serde",
+ "serde_json",
+ "shlex",
+ "strum",
+ "tempfile",
+ "thiserror",
+ "which",
+]
+
+[[package]]
 name = "enumset"
 version = "1.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -494,7 +517,7 @@ dependencies = [
  "embedded-hal-nb",
  "embedded-io",
  "embedded-io-async",
- "embuild",
+ "embuild 0.31.4",
  "enumset",
  "esp-idf-sys",
  "heapless",
@@ -514,7 +537,7 @@ dependencies = [
  "build-time",
  "cargo_metadata",
  "const_format",
- "embuild",
+ "embuild 0.31.4",
  "envy",
  "libc",
  "regex",

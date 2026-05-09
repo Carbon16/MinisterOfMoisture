@@ -1,11 +1,18 @@
 [build]
-target-dir = "/tmp/m"
+target-dir = "C:/m"
 target = "xtensa-esp32-espidf"
 
 [target.xtensa-esp32-espidf]
 linker = "ldproxy"
-rustflags = ["--cfg", "espidf_time64"]
+rustflags = ["--cfg", "espidf_time32"]
 runner = "espflash flash --monitor"
+
+[env]
+CARGO_BUILD_JOBS = "8"
+ESP_IDF_VERSION = "v4.4.1"
+ESP_IDF_SYS_ROOT_CRATE = "MinisterOfMoisture"
+CARGO_WORKSPACE_DIR = { value = ".", relative = true }
+PYTHON = "C:/Users/Student/AppData/Local/Programs/Python/Python311/python.exe"
 
 [unstable]
 build-std = ["std", "panic_abort"]

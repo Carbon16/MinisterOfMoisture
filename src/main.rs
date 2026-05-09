@@ -43,30 +43,29 @@ fn main() {
     println!("RFID Reader initialized. Waiting for cards...\n");
 
     loop {
-        // Check if a card is present
-        if let Ok(atqa) = mfrc522.reqa() {
-            println!("Card detected!");
+        // Read a new card and print everything the crate exposes.
+        match mfrc522.reqa().and_then(|atqa| mfrc522.select(&atqa).map(|uid| (atqa, uid))) {
+            Ok((_atqa, uid)) => {
+                let uid_bytes = uid.as_bytes();
+                let uid_hex = format_uid(uid_bytes);
+                let uid_key = format_uid_nodash(uid_bytes);
+                let uid_type = uid.get_type();
 
-            // Select the card
-            if let Ok(uid) = mfrc522.select(&atqa) {
-                println!("UID: {:02X?}", uid.bytes);
-                println!("UID String: {}", format_uid(&uid.bytes));
-                // Increment and store count for this UID
-                let uid_key = format_uid_nodash(&uid.bytes);
+                println!("Card detected!");
+                println!("UID bytes: {:02X?}", uid_bytes);
+                println!("UID string: {}", uid_hex);
+                println!("UID length: {} bytes", uid_bytes.len());
+                println!("PICC type: {:?}", uid_type);
+
                 match increment_uid_count(&uid_key) {
                     Ok(new_count) => println!("UID {} count now {}", uid_key, new_count),
                     Err(e) => println!("Failed to update NVS for {}: {:?}", uid_key, e),
                 }
-            }
-        }
 
-        // Anti-collision detection and read UID
-        match mfrc522.anticollision() {
-            Ok(uid) => {
-                println!("Card UID: {}", format_uid(&uid));
+                let _ = mfrc522.hlta();
             }
             Err(_) => {
-                // No card or reading error, continue
+                // No card or reading error, continue.
             }
         }
 

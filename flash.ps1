@@ -1,5 +1,5 @@
 Param(
-    [string]$Port = "COM3",
+    [string]$Port = "COM6",
     [int]$FlashBaud = 460800,
     [int]$MonitorBaud = 115200,
     [switch]$Release,

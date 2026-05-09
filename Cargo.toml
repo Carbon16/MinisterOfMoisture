@@ -9,3 +9,17 @@ mfrc522 = "0.8.0"
 esp-idf-hal = "0.43"
 esp-idf-sys = "0.34"
 embedded-hal = "0.2"
+
+[package.metadata.esp-idf-sys]
+esp_idf_version = "v4.4.1"
+esp_idf_tools_install_dir = "global"
+
+[build-dependencies]
+embuild = { version = "0.33", features = ["espidf"] }
+
+[profile.release]
+opt-level = 1
+codegen-units = 16
+lto = false
+incremental = true
+debug = 0
