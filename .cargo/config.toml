@@ -1,5 +1,5 @@
 [build]
-target-dir = "C:/m"
+target-dir = "/tmp/m"
 target = "xtensa-esp32-espidf"
 
 [target.xtensa-esp32-espidf]
@@ -12,7 +12,6 @@ CARGO_BUILD_JOBS = "8"
 ESP_IDF_VERSION = "v4.4.1"
 ESP_IDF_SYS_ROOT_CRATE = "MinisterOfMoisture"
 CARGO_WORKSPACE_DIR = { value = ".", relative = true }
-PYTHON = "C:/Users/Student/AppData/Local/Programs/Python/Python311/python.exe"
 
 [unstable]
 build-std = ["std", "panic_abort"]
