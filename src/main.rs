@@ -16,7 +16,6 @@ use esp_idf_svc::http::server::{Configuration as HttpConfig, EspHttpServer};
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::wifi::{BlockingWifi, ClientConfiguration, Configuration, EspWifi};
 
-// Pulls these values from .env at compile time!
 const WIFI_SSID: &str = match option_env!("WIFI_SSID") {
     Some(s) => s,
     None => "YOUR_WIFI_SSID",
@@ -82,12 +81,11 @@ fn main() {
     let oliver_reset = oliver_count.clone();
     let leo_reset = leo_count.clone();
 
-    // HTTP Server (runs its own FreeRTOS tasks internally — no blocking on Core 0)
+    // HTTP Server on core 1(?) idk
     let mut server = EspHttpServer::new(&HttpConfig::default()).unwrap();
 
     server
         .fn_handler("/", esp_idf_svc::http::Method::Get, move |request| {
-            // Read directly from atomics — no NVS, no blocking
             let oliver = oliver_http.load(Ordering::Relaxed);
             let leo = leo_http.load(Ordering::Relaxed);
             let html = format!(
@@ -97,9 +95,17 @@ fn main() {
             <h1 style='color: #4da8da;'>Kid named finger</h1>\
             <h2>Leaderboard</h2>\
             <div style='font-size: 24px; margin: 20px;'>\
-                <p>Oliver: <b>{}</b> taps</p>\
-                <p>Leo: <b>{}</b> taps</p>\
+                <p>Oliver: <b id='oliver'>{}</b> taps</p>\
+                <p>Leo: <b id='leo'>{}</b> taps</p>\
             </div>\
+            <script>\
+            setInterval(function(){\
+                fetch('/raw').then(function(r){return r.json();}).then(function(d){\
+                    document.getElementById('oliver').innerText=d.oliver;\
+                    document.getElementById('leo').innerText=d.leo;\
+                });\
+            },2000);\
+            </script>\
             </body></html>",
                 oliver, leo
             );
@@ -130,13 +136,25 @@ fn main() {
         )
         .unwrap();
 
+    server
+        .fn_handler("/raw", esp_idf_svc::http::Method::Get, |request| {
+            // just send raw counts so js on html can refresh every 2s. send as json
+            let oliver = oliver_count.load(Ordering::Relaxed);
+            let leo = leo_count.load(Ordering::Relaxed);
+            let json = format!("{{\"oliver\": {}, \"leo\": {}}}", oliver, leo);
+            let mut response = request.into_ok_response().unwrap();
+            response.write(json.as_bytes()).unwrap();
+            Ok::<(), sys::EspError>(())
+        })
+        .unwrap();
+
     println!("Web server running on port 80");
 
     // LCD disabled
     // let i2c_config = i2c::config::Config::new().baudrate(100_000.into());
     // let mut i2c = i2c::I2cDriver::new(peripherals.i2c0, pins.gpio21, pins.gpio22, &i2c_config).unwrap();
 
-    // Configure SPI for MFRC522 — these get MOVED into the RFID thread
+    // Configure SPI for MFRC522, these get MOVED into the RFID thread hopefully
     let spi = peripherals.spi2;
     let sclk = pins.gpio18;
     let serial_in = pins.gpio19;
@@ -148,8 +166,8 @@ fn main() {
     let leo_rfid = leo_count.clone();
 
     // -----------------------------------------------------------------------
-    // RFID thread — pinned to Core 1 via FreeRTOS scheduler
-    // The main thread (Core 0) is now completely free for HTTP + IDLE
+    // RFID thread — pin to Core 1
+    // The main thread (Core 0) is now free for HTTP
     // -----------------------------------------------------------------------
     let _rfid_thread = thread::Builder::new()
         .stack_size(32768)
@@ -251,7 +269,7 @@ fn format_uid_nodash(bytes: &[u8]) -> String {
         .join("")
 }
 
-/// Sleep in 100ms chunks — ensures the scheduler always gets a chance to run IDLE.
+/// Sleep in 100ms chunks so scheduler always gets a chance to run IDLE.
 fn sleep_ms(ms: u64) {
     let chunks = ms / 100;
     let remainder = ms % 100;
