@@ -9,9 +9,9 @@ struct Args {
     uid: String,
     #[arg(short, long)]
     nt: String,
-    #[arg(short, long)]
+    #[arg(short, long, default_value = "00000000")]
     nr: String,
-    #[arg(short, long)]
+    #[arg(short, long, default_value = "00000000")]
     ar: String,
 }
 
