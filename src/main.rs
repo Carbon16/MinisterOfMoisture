@@ -13,11 +13,13 @@ use esp_idf_svc::wifi::{BlockingWifi, EspWifi, ClientConfiguration, Configuratio
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::http::server::{EspHttpServer, Configuration as HttpConfig};
-// Note: mDNS requires CONFIG_MDNS_ENABLED in sdkconfig - access via IP shown in serial monitor
+use esp_idf_svc::mdns::EspMdns;
 
 // Pulls these values from .env at compile time!
 const WIFI_SSID: &str = match option_env!("WIFI_SSID") { Some(s) => s, None => "YOUR_WIFI_SSID" };
 const WIFI_PASS: &str = match option_env!("WIFI_PASS") { Some(s) => s, None => "YOUR_WIFI_PASSWORD" };
+const MDNS_HOSTNAME: &str = "waltuh";
+
 const OLIVER_UID: &str = "4A085B7F";
 const LEO_UID: &str = "8A9C617F";
 
@@ -56,6 +58,11 @@ fn main() {
         println!("Failed to connect to Wi-Fi. Continuing without it.");
     }
 
+    // mDNS Setup - advertises the server as waltuh.local
+    let mut mdns = EspMdns::take().unwrap();
+    mdns.set_hostname(MDNS_HOSTNAME).unwrap();
+    mdns.set_instance_name("Minister of Moisture").unwrap();
+
     // HTTP Server Setup
     let mut server = EspHttpServer::new(&HttpConfig::default()).unwrap();
     server.fn_handler("/", esp_idf_svc::http::Method::Get, |request| {
@@ -64,7 +71,7 @@ fn main() {
         let html = format!(
             "<html><head><title>Moisture Leaderboard</title></head>\
             <body style='font-family: sans-serif; text-align: center; background-color: #1e1e2f; color: #ffffff;'>\
-            <h1 style='color: #4da8da;'>💧 Minister of Moisture 💧</h1>\
+            <h1 style='color: #4da8da;'>Kid named finger</h1>\
             <h2>Leaderboard</h2>\
             <div style='font-size: 24px; margin: 20px;'>\
                 <p>Oliver: <b>{}</b> taps</p>\
@@ -78,7 +85,7 @@ fn main() {
         Ok::<(), sys::EspError>(())
     }).unwrap();
 
-    println!("Web server running on port 80 - check serial for IP");
+    println!("Web server running at http://{}.local", MDNS_HOSTNAME);
 
     // Configure I2C for LCD (using standard SDA=21, SCL=22)
     let i2c_config = i2c::config::Config::new().baudrate(100_000.into());

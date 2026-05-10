@@ -16,6 +16,7 @@ rand = "0.8"
 [package.metadata.esp-idf-sys]
 esp_idf_version = "v5.2"
 esp_idf_tools_install_dir = "global"
+esp_idf_component_manager = "y"
 
 [build-dependencies]
 embuild = { version = "0.33", features = ["espidf"] }
