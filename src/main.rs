@@ -13,13 +13,10 @@ use esp_idf_svc::wifi::{BlockingWifi, EspWifi, ClientConfiguration, Configuratio
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::http::server::{EspHttpServer, Configuration as HttpConfig};
-use esp_idf_svc::mdns::EspMdns;
 
 // Pulls these values from .env at compile time!
 const WIFI_SSID: &str = match option_env!("WIFI_SSID") { Some(s) => s, None => "YOUR_WIFI_SSID" };
 const WIFI_PASS: &str = match option_env!("WIFI_PASS") { Some(s) => s, None => "YOUR_WIFI_PASSWORD" };
-const MDNS_HOSTNAME: &str = "waltuh";
-
 const OLIVER_UID: &str = "4A085B7F";
 const LEO_UID: &str = "8A9C617F";
 
@@ -58,11 +55,6 @@ fn main() {
         println!("Failed to connect to Wi-Fi. Continuing without it.");
     }
 
-    // mDNS Setup - advertises the server as waltuh.local
-    let mut mdns = EspMdns::take().unwrap();
-    mdns.set_hostname(MDNS_HOSTNAME).unwrap();
-    mdns.set_instance_name("Minister of Moisture").unwrap();
-
     // HTTP Server Setup
     let mut server = EspHttpServer::new(&HttpConfig::default()).unwrap();
     server.fn_handler("/", esp_idf_svc::http::Method::Get, |request| {
@@ -85,21 +77,42 @@ fn main() {
         Ok::<(), sys::EspError>(())
     }).unwrap();
 
-    println!("Web server running at http://{}.local", MDNS_HOSTNAME);
+    // Reset endpoint - clears all tap counts
+    server.fn_handler("/reset/password/waltuh", esp_idf_svc::http::Method::Get, |request| {
+        reset_all_counts();
+        let html = "<html><body style='font-family:sans-serif;text-align:center;background:#1e1e2f;color:#fff'>\
+            <h1>Counts reset!</h1><a href='/'>Back</a></body></html>";
+        let mut response = request.into_ok_response().unwrap();
+        response.write(html.as_bytes()).unwrap();
+        Ok::<(), sys::EspError>(())
+    }).unwrap();
+
+    println!("Web server running on port 80 - find IP in router DHCP table");
 
     // Configure I2C for LCD (using standard SDA=21, SCL=22)
     let i2c_config = i2c::config::Config::new().baudrate(100_000.into());
     let mut i2c = i2c::I2cDriver::new(peripherals.i2c0, pins.gpio21, pins.gpio22, &i2c_config).unwrap();
     let mut delay = Ets;
     
-    // Wrap Lcd in an Option in case it fails to init so the rest still works
-    let mut lcd_opt = match Lcd::new(&mut i2c, &mut delay).init() {
-        Ok(l) => Some(l),
-        Err(_) => {
-            println!("Failed to initialize LCD");
+    // Try 0x27 first (most common), fall back to 0x3F
+    let mut lcd_opt = Lcd::new(&mut i2c, &mut delay)
+        .with_address(0x27)
+        .with_rows(1)
+        .init()
+        .or_else(|_| {
+            Lcd::new(&mut i2c, &mut delay)
+                .with_address(0x3F)
+                .with_rows(1)
+                .init()
+        })
+        .map(|l| {
+            println!("LCD initialized OK");
+            Some(l)
+        })
+        .unwrap_or_else(|_| {
+            println!("Failed to initialize LCD (tried 0x27 and 0x3F)");
             None
-        }
-    };
+        });
 
     if let Some(ref mut lcd) = lcd_opt {
         let _ = lcd.clear();
@@ -155,8 +168,8 @@ fn main() {
                                     let _ = lcd.set_cursor(0, 0);
                                     let _ = lcd.write_str(&format!("Thanks {}!", name));
                                     
-                                    // Let them see "Thanks" for 2 seconds
-                                    thread::sleep(Duration::from_secs(1));
+                                    // Let them see "Thanks" for 1 second
+                                    sleep_ms(1000);
                                     
                                     let r = unsafe { sys::esp_random() } as usize;
                                     let motd = MOTDS[r % MOTDS.len()];
@@ -175,12 +188,12 @@ fn main() {
                                     }
                                 } else {
                                     // If no LCD, just wait the 2 seconds
-                                    thread::sleep(Duration::from_secs(1));
+                                    sleep_ms(1000);
                                 }
 
-                                // Remaining 28s cooldown
+                                // 5s cooldown
                                 println!("Starting 5s cooldown...");
-                                thread::sleep(Duration::from_secs(5));
+                                sleep_ms(5000);
                             },
                             Err(e) => println!("Failed to update NVS: {:?}", e),
                         }
@@ -205,6 +218,36 @@ fn main() {
 
 fn format_uid_nodash(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join("")
+}
+
+/// Sleep in 100ms chunks so FreeRTOS IDLE always gets CPU time within the WDT window.
+fn sleep_ms(ms: u64) {
+    let chunks = ms / 100;
+    let remainder = ms % 100;
+    for _ in 0..chunks {
+        thread::sleep(Duration::from_millis(100));
+    }
+    if remainder > 0 {
+        thread::sleep(Duration::from_millis(remainder));
+    }
+}
+
+/// Set both tap counts to zero in NVS.
+fn reset_all_counts() {
+    for uid in &[OLIVER_UID, LEO_UID] {
+        let namespace = CString::new("storage").unwrap();
+        let key = CString::new(*uid).unwrap();
+        let mut handle: sys::nvs_handle_t = 0;
+        unsafe {
+            let err = sys::nvs_open(namespace.as_ptr(), sys::nvs_open_mode_t_NVS_READWRITE, &mut handle);
+            if err == sys::ESP_OK {
+                sys::nvs_set_u32(handle, key.as_ptr(), 0);
+                sys::nvs_commit(handle);
+                sys::nvs_close(handle);
+            }
+        }
+    }
+    println!("All tap counts reset to 0");
 }
 
 fn init_nvs() -> Result<(), sys::esp_err_t> {
