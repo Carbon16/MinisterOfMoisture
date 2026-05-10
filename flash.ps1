@@ -35,38 +35,28 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-# Try to locate the built firmware image under target/ (bin/elf/bin-like files)
-$projectRoot = Get-Location
-$cargoToml = Join-Path $projectRoot "Cargo.toml"
-$pkgName = $null
-if (Test-Path $cargoToml) {
-    $content = Get-Content $cargoToml -Raw
-    if ($content -match 'name\s*=\s*"([^"]+)"') { $pkgName = $matches[1] }
-}
-
-$image = $null
-if ($pkgName) {
-    # search for files that match package name (common outputs: .bin, .elf, no-ext)
-    $candidates = Get-ChildItem -Path (Join-Path $projectRoot 'target') -Recurse -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Name -like "$pkgName*" -and -not $_.PSIsContainer } |
-                  Sort-Object LastWriteTime -Descending
-    if ($candidates.Count -gt 0) { $image = $candidates[0].FullName }
-}
-
-if (-not $image) {
-    Write-Host "Could not find built image automatically; falling back to letting espflash build (use -Release to build manually)" -ForegroundColor Yellow
-    $flashArgs = @('flash', '--port', $Port, '--baud', "$FlashBaud", '.')
-    Write-Host "Running: espflash $($flashArgs -join ' ')"
-    & espflash @flashArgs
-    $flashExit = $LASTEXITCODE
+if ($Monitor.IsPresent) {
+    # If the user wants to monitor, just invoke `cargo run`.
+    # `.cargo/config.toml` defines `runner = "espflash flash --monitor"`
+    Write-Host "Running: cargo run"
+    if ($Release.IsPresent) {
+        cargo run --release
+    } else {
+        cargo run
+    }
 } else {
-    Write-Host "Found image: $image" -ForegroundColor Green
-    $flashArgs = @('flash', '--port', $Port, '--baud', "$FlashBaud", $image)
-    Write-Host "Running: espflash $($flashArgs -join ' ')"
-    & espflash @flashArgs
-    $flashExit = $LASTEXITCODE
+    # If not monitoring, use the known output path in `/tmp/m/xtensa-esp32-espidf`
+    if ($Release.IsPresent) {
+        $image = "/tmp/m/xtensa-esp32-espidf/release/MinisterOfMoisture"
+    } else {
+        $image = "/tmp/m/xtensa-esp32-espidf/debug/MinisterOfMoisture"
+    }
+    Write-Host "Running: espflash flash $image"
+    $flashArgs = @('flash', '--port', $Port, '--baud', "$FlashBaud")
+    & espflash @flashArgs $image
 }
 
+$flashExit = $LASTEXITCODE
 if ($flashExit -ne 0) {
     Write-Host "Flashing failed with exit code $flashExit" -ForegroundColor Red
     exit $flashExit

