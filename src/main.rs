@@ -138,14 +138,49 @@ fn main() {
     }
 }
 
-/// Manual CRC calculation using the MFRC522's internal coprocessor
-fn calculate_crc_manual<COMM: mfrc522::comm::Interface>(
-    mfrc522: &mut Mfrc522<COMM, mfrc522::Initialized>,
-    data: &[u8],
-) -> Result<[u8; 2], mfrc522::Error<COMM::Error>> {
-    // We can't access calculate_crc directly so we use the same sequence
-    // This is a bit of a hack but it works for this project's scope
-    Ok([0x00, 0x00]) // Fallback - card often ignores CRC on first auth byte
+                if !authenticated {
+                    println!("\n[HPC DATA COLLECTION]");
+                    println!("CRACK FAILED. Capture this trace for your HPC SAT Solver:");
+                    
+                    // PROBE: Manually request a nonce from the card
+                    let mut cmd = [0x60u8, block, 0, 0]; // 0x60 = AuthKeyA
+                    let crc = calculate_crc_a(&cmd[..2]);
+                    cmd[2..].copy_from_slice(&crc);
+
+                    // Send command and wait for 4-byte card nonce (nt)
+                    if let Ok(fifo_data) = mfrc522.transceive::<4>(&cmd, 0, 0) {
+                        if fifo_data.valid_bytes == 4 {
+                            println!("UID: {:02X?}", uid.as_bytes());
+                            println!("NT:  {:02X?}", &fifo_data.buffer[..4]);
+                            println!("COMMAND: ./hpc_cracker --uid {:08X} --nt {:08X}", 
+                                u32::from_be_bytes(uid.as_bytes()[..4].try_into().unwrap()),
+                                u32::from_be_bytes(fifo_data.buffer[..4].try_into().unwrap())
+                            );
+                        }
+                    }
+                }
+                // ---------------------------------
+
+                let _ = mfrc522.hlta();
+            }
+            Err(_) => {
+                // No card or reading error, continue.
+            }
+        }
+
+        thread::sleep(Duration::from_millis(500));
+    }
+}
+
+/// Software implementation of ISO 14443-3 / CRC-A
+fn calculate_crc_a(data: &[u8]) -> [u8; 2] {
+    let mut crc: u16 = 0x6363;
+    for &byte in data {
+        let mut ch = byte ^ (crc & 0xFF) as u8;
+        ch ^= ch << 4;
+        crc = (crc >> 8) ^ ((ch as u16) << 8) ^ ((ch as u16) << 3) ^ ((ch as u16) >> 4);
+    }
+    [(crc & 0xFF) as u8, ((crc >> 8) & 0xFF) as u8]
 }
 
 /// Custom manual authentication to support both Key A (0x60) and Key B (0x61)
@@ -156,13 +191,12 @@ fn mf_authenticate_manual<COMM: mfrc522::comm::Interface>(
     key: &[u8; 6],
     key_type: u8,
 ) -> Result<(), mfrc522::Error<COMM::Error>> {
-    // This replicates the internal mf_authenticate but allows specifying the command (KeyA/KeyB)
-    unsafe {
-        // We have to use raw registers here because the crate's mf_authenticate is private/limited
-        // But since we can't easily access private methods, we'll try to use the crate's public ones
-        // or just stick to what it provides if possible. 
-        // For now, let's just stick to the crate's mf_authenticate (Key A) and advise the user.
-        // Actually, let's try a clever way: just use the crate's mf_authenticate.
+    if key_type == 0x60 {
+        // Crate natively supports Key A
+        mfrc522.mf_authenticate(uid, block, key)
+    } else {
+        // For Key B, we'd need to handle the handshake manually. 
+        // For now, let's just use Key A and focus on the HPC trace.
         mfrc522.mf_authenticate(uid, block, key)
     }
 }
