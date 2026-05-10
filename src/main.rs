@@ -76,10 +76,12 @@ fn main() {
     let leo_count = Arc::new(AtomicU32::new(get_uid_count(LEO_UID).unwrap_or(0)));
 
     // Clone Arcs for HTTP handlers
-    let oliver_http = oliver_count.clone();
-    let leo_http = leo_count.clone();
+    let oliver_http  = oliver_count.clone();
+    let leo_http     = leo_count.clone();
     let oliver_reset = oliver_count.clone();
-    let leo_reset = leo_count.clone();
+    let leo_reset    = leo_count.clone();
+    let oliver_raw   = oliver_count.clone();
+    let leo_raw      = leo_count.clone();
 
     // HTTP Server on core 1(?) idk
     let mut server = EspHttpServer::new(&HttpConfig::default()).unwrap();
@@ -99,12 +101,12 @@ fn main() {
                 <p>Leo: <b id='leo'>{}</b> taps</p>\
             </div>\
             <script>\
-            setInterval(function(){\
-                fetch('/raw').then(function(r){return r.json();}).then(function(d){\
+            setInterval(function(){{\
+                fetch('/raw').then(function(r){{return r.json();}}).then(function(d){{\
                     document.getElementById('oliver').innerText=d.oliver;\
                     document.getElementById('leo').innerText=d.leo;\
-                });\
-            },2000);\
+                }});\
+            }},2000);\
             </script>\
             </body></html>",
                 oliver, leo
@@ -137,10 +139,9 @@ fn main() {
         .unwrap();
 
     server
-        .fn_handler("/raw", esp_idf_svc::http::Method::Get, |request| {
-            // just send raw counts so js on html can refresh every 2s. send as json
-            let oliver = oliver_count.load(Ordering::Relaxed);
-            let leo = leo_count.load(Ordering::Relaxed);
+        .fn_handler("/raw", esp_idf_svc::http::Method::Get, move |request| {
+            let oliver = oliver_raw.load(Ordering::Relaxed);
+            let leo    = leo_raw.load(Ordering::Relaxed);
             let json = format!("{{\"oliver\": {}, \"leo\": {}}}", oliver, leo);
             let mut response = request.into_ok_response().unwrap();
             response.write(json.as_bytes()).unwrap();
