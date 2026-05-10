@@ -6,16 +6,19 @@ edition = "2024"
 [dependencies]
 lcd-lcm1602-i2c = "0.3.0"
 mfrc522 = "0.8.0"
-esp-idf-hal = "0.43"
-esp-idf-sys = "0.34"
+esp-idf-hal = "0.44"
+esp-idf-sys = "0.35"
 embedded-hal = "0.2"
-
+esp-idf-svc = { version = "0.49", features = ["std"] }
+log = "0.4"
+rand = "0.8"
 [package.metadata.esp-idf-sys]
-esp_idf_version = "v5.1"
+esp_idf_version = "v5.2"
 esp_idf_tools_install_dir = "global"
 
 [build-dependencies]
 embuild = { version = "0.33", features = ["espidf"] }
+dotenvy = "0.15"
 
 [profile.release]
 opt-level = 1
