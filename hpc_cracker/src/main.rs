@@ -25,7 +25,7 @@ impl Crypto1 {
         // Initializing with key and uid
         for i in 0..48 {
             let bit = ((key >> i) & 1) ^ ((uid as u64 >> (i % 32)) & 1);
-            s.feed(bit as u8, false);
+            s.feed(bit as u8, 0);
         }
         s
     }
