@@ -1,25 +1,23 @@
-use esp_idf_hal::prelude::*;
+// Prelude removed in 0.44+
 use esp_idf_hal::spi;
 use esp_idf_hal::i2c;
 use esp_idf_hal::delay::Ets;
 use esp_idf_sys as sys;
 use mfrc522::Mfrc522;
-use lcd_lcm1602_i2c::Lcd;
+use lcd_lcm1602_i2c::sync_lcd::Lcd;
 use std::ffi::CString;
 use std::thread;
 use std::time::Duration;
-use std::io::Write;
+
 use esp_idf_svc::wifi::{BlockingWifi, EspWifi, ClientConfiguration, Configuration};
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::http::server::{EspHttpServer, Configuration as HttpConfig};
-use esp_idf_svc::mdns::EspMdns;
+// Note: mDNS requires CONFIG_MDNS_ENABLED in sdkconfig - access via IP shown in serial monitor
 
 // Pulls these values from .env at compile time!
-const WIFI_SSID: &str = option_env!("WIFI_SSID").unwrap_or("YOUR_WIFI_SSID");
-const WIFI_PASS: &str = option_env!("WIFI_PASS").unwrap_or("YOUR_WIFI_PASSWORD");
-const MDNS_HOSTNAME: &str = "waltuh";
-
+const WIFI_SSID: &str = match option_env!("WIFI_SSID") { Some(s) => s, None => "YOUR_WIFI_SSID" };
+const WIFI_PASS: &str = match option_env!("WIFI_PASS") { Some(s) => s, None => "YOUR_WIFI_PASSWORD" };
 const OLIVER_UID: &str = "4A085B7F";
 const LEO_UID: &str = "8A9C617F";
 
@@ -36,15 +34,18 @@ fn main() {
     let nvs = EspDefaultNvsPartition::take().unwrap();
     init_nvs().expect("Failed to initialize NVS");
 
+    let peripherals = esp_idf_hal::peripherals::Peripherals::take().unwrap();
+    let pins = peripherals.pins;
+
     // Wi-Fi Setup
     let mut wifi = BlockingWifi::wrap(
-        EspWifi::new(sys_loop.clone(), nvs.clone()).unwrap(),
+        EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs.clone())).unwrap(),
         sys_loop,
     ).unwrap();
 
     wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-        ssid: WIFI_SSID.into(),
-        password: WIFI_PASS.into(),
+        ssid: WIFI_SSID.try_into().unwrap(),
+        password: WIFI_PASS.try_into().unwrap(),
         ..Default::default()
     })).unwrap();
 
@@ -54,11 +55,6 @@ fn main() {
     } else {
         println!("Failed to connect to Wi-Fi. Continuing without it.");
     }
-
-    // mDNS Setup
-    let mut mdns = EspMdns::take().unwrap();
-    mdns.set_hostname(MDNS_HOSTNAME).unwrap();
-    mdns.set_instance_name("Minister of Moisture").unwrap();
 
     // HTTP Server Setup
     let mut server = EspHttpServer::new(&HttpConfig::default()).unwrap();
@@ -71,24 +67,21 @@ fn main() {
             <h1 style='color: #4da8da;'>💧 Minister of Moisture 💧</h1>\
             <h2>Leaderboard</h2>\
             <div style='font-size: 24px; margin: 20px;'>\
-                <p>👦 Oliver: <b>{}</b> taps</p>\
-                <p>🦁 Leo: <b>{}</b> taps</p>\
+                <p>Oliver: <b>{}</b> taps</p>\
+                <p>Leo: <b>{}</b> taps</p>\
             </div>\
             </body></html>",
             oliver, leo
         );
         let mut response = request.into_ok_response().unwrap();
-        response.write_all(html.as_bytes()).unwrap();
-        Ok(())
+        response.write(html.as_bytes()).unwrap();
+        Ok::<(), sys::EspError>(())
     }).unwrap();
 
-    println!("Web server running at http://{}.local", MDNS_HOSTNAME);
-
-    let peripherals = Peripherals::take().unwrap();
-    let pins = peripherals.pins;
+    println!("Web server running on port 80 - check serial for IP");
 
     // Configure I2C for LCD (using standard SDA=21, SCL=22)
-    let i2c_config = i2c::config::Config::new().baudrate(100.kHz().into());
+    let i2c_config = i2c::config::Config::new().baudrate(100_000.into());
     let mut i2c = i2c::I2cDriver::new(peripherals.i2c0, pins.gpio21, pins.gpio22, &i2c_config).unwrap();
     let mut delay = Ets;
     
@@ -114,7 +107,7 @@ fn main() {
     let serial_out = pins.gpio23;
     let cs = pins.gpio5;
 
-    let spi_config = spi::config::Config::new().baudrate(1.MHz().into()).data_mode(spi::config::MODE_0);
+    let spi_config = spi::config::Config::new().baudrate(1_000_000.into()).data_mode(spi::config::MODE_0);
     let spi_device = spi::SpiDeviceDriver::new_single(
         spi, sclk, serial_out, Some(serial_in), Some(cs),
         &spi::config::DriverConfig::new(), &spi_config,
